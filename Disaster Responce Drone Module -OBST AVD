@@ -1,0 +1,107 @@
+import cv2
+import time
+import numpy as np
+from djitellopy import Tello
+
+
+tello = Tello()
+tello.connect()
+
+
+tello.set_speed(100)
+
+
+tello.takeoff()
+tello.send_rc_control(0, 0, 40, 0)  # Ascend to 40 meters
+time.sleep(10)  # Adjust sleep time as needed for the drone to reach the desired height
+
+
+tello.streamon()
+
+dow
+cv2.namedWindow("Tello Obstacle Avoidance")
+
+
+lk_params = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
+
+obstacle_detected = False
+obstacle_distance_threshold = 100  # Threshold for considering an obstacle (in pixels)
+
+
+altitude_adjustment = 0
+lateral_adjustment = 0
+
+
+old_frame = None
+old_points = None
+
+while True:
+    
+    frame = tello.get_frame_read()
+
+    
+    if frame.frame is None:
+        print("No frame received. Skipping...")
+        continue
+
+    
+    gray = cv2.cvtColor(frame.frame, cv2.COLOR_BGR2GRAY)
+
+    
+    if old_frame is None:
+        old_frame = gray
+        old_points = cv2.goodFeaturesToTrack(old_frame, maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
+
+    
+    new_points, status, error = cv2.calcOpticalFlowPyrLK(old_frame, gray, old_points, None, **lk_params)
+
+    
+    good_new = new_points[status == 1]
+    good_old = old_points[status == 1]
+
+    
+    if len(good_new) > 0:
+        mean_flow = np.mean(good_new - good_old, axis=0)
+    else:
+        mean_flow = np.array([0, 0])
+
+   
+    old_frame = gray.copy()
+    old_points = good_new.reshape(-1, 1, 2)
+
+    
+    obstacle_detected = np.linalg.norm(mean_flow) > obstacle_distance_threshold
+
+   
+    if obstacle_detected:
+        
+        if mean_flow[1] > 0:
+            altitude_adjustment = 20  
+        else:
+            altitude_adjustment = -20 
+
+        
+        if mean_flow[0] > 0:
+            lateral_adjustment = -20  
+        else:
+            lateral_adjustment = 20  
+    else:
+        altitude_adjustment = 0
+        lateral_adjustment = 0
+
+    
+    tello.send_rc_control(0, lateral_adjustment, altitude_adjustment, 0)
+
+    
+    cv2.imshow("Tello Obstacle Avoidance", frame.frame)
+
+    
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+
+cv2.destroyAllWindows()
+tello.streamoff()
+tello.land()
+tello.end()
